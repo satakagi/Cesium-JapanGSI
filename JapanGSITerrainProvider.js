@@ -1,4 +1,16 @@
-//**
+// JapanGSITerrainProvider: 地理院の　標高タイルデータをCesiumの地形モデルとして利用できるようにする
+//
+// 標高タイルに関する参照情報:
+// https://maps.gsi.go.jp/development/ichiran.html
+// https://maps.gsi.go.jp/development/hyokochi.html
+//
+// History:
+// 2026年までのものはgit logで確認してください
+// 2026/04/10 : 地理院の/dem/の公開データにz=0がなくなったたのを受けて、level0-8までは地球地図(demgm)を使用する。
+//
+// Note:
+// テキストデータは廃止される可能性が高い(デフォルトをpngに)
+
 (function () {
 	var defaultValue = Cesium.defaultValue,
 		defined = Cesium.defined,
@@ -20,13 +32,17 @@
 
 	var trailingSlashRegex = /\/$/;
 	var defaultCredit = new Credit("国土地理院");
-	// ISSUE1: Since Level 15 does not cover the whole country of Japan, it seems that there are cases where altitude becomes 0 when sampleTerrainMostDetailed is used. On the other hand, in terrain rendering, the problem does not appear to be caused by fallback.
 	var GSI_MAX_TERRAIN_LEVEL = 14;
 
 	var JapanGSITerrainProvider = function JapanGSITerrainProvider(options) {
+		var self = this;
 		options = defaultValue(options, {});
 
 		this._usePngData = defaultValue(options.usePngData, true);
+		this._maxTerrainLevel = defaultValue(
+			options.maxTerrainLevel,
+			GSI_MAX_TERRAIN_LEVEL,
+		);
 		var url;
 		if (this._usePngData) {
 			url = defaultValue(
@@ -67,11 +83,11 @@
 		// set availability
 		this._availability = new TileAvailability(
 			this._tilingScheme,
-			GSI_MAX_TERRAIN_LEVEL,
+			this._maxTerrainLevel,
 		);
 		// 05/2018 Processing of this part is suspicious, but seems to work...
 		this._availability.addAvailableTileRange(0, 0, 0, 0, 0);
-		for (var i = 0; i < GSI_MAX_TERRAIN_LEVEL; i++) {
+		for (var i = 0; i < this._maxTerrainLevel; i++) {
 			this._availability.addAvailableTileRange(
 				i + 1,
 				-65536,
@@ -83,7 +99,7 @@
 		// It's pretty messy, Try overriding
 		this._availability.computeMaximumLevelAtPosition = function (position) {
 			console.log("called GSI's computeMaximumLevelAtPosition");
-			return GSI_MAX_TERRAIN_LEVEL;
+			return self._maxTerrainLevel;
 		};
 
 		this._heightmapWidth = 32;
@@ -123,9 +139,9 @@
 		var orgx = x;
 		var orgy = y;
 		var shift = 0;
-		if (level > GSI_MAX_TERRAIN_LEVEL) {
-			shift = level - GSI_MAX_TERRAIN_LEVEL;
-			level = GSI_MAX_TERRAIN_LEVEL;
+		if (level > this._maxTerrainLevel) {
+			shift = level - this._maxTerrainLevel;
+			level = this._maxTerrainLevel;
 		}
 
 		x >>= shift + 1;
@@ -134,28 +150,27 @@
 		var shifty = (orgy % Math.pow(2, shift)) / Math.pow(2, shift);
 
 		var url;
+
+		var dsCat;
+		if (level > 15) {
+			// dem1a 航空レーザー1m
+			dsCat = "1a";
+		} else if (level == 15) {
+			// dem5a 航空レーザー5m
+			dsCat = "5a";
+		} else if (level > 8) {
+			// dem10 航空レーザー10m
+			dsCat = "";
+		} else {
+			// 地球地図(全球)を使う
+			dsCat = "gm";
+		}
+
 		if (usePngData) {
 			url =
-				this._url +
-				(level == 15 ? "5a_png" : "_png") +
-				"/" +
-				level +
-				"/" +
-				x +
-				"/" +
-				y +
-				".png";
+				this._url + dsCat + "_png" + "/" + level + "/" + x + "/" + y + ".png";
 		} else {
-			url =
-				this._url +
-				(level == 15 ? "5a" : "") +
-				"/" +
-				level +
-				"/" +
-				x +
-				"/" +
-				y +
-				".txt";
+			url = this._url + dsCat + "/" + level + "/" + x + "/" + y + ".txt";
 		}
 
 		var proxy = this._proxy;
@@ -265,7 +280,7 @@
 				width: self._heightmapWidth,
 				height: self._heightmapWidth,
 				structure: self._terrainDataStructure,
-				childTileMask: GSI_MAX_TERRAIN_LEVEL,
+				// childTileMask: self._maxTerrainLevel, // 2026/04/10 これはコメントアウトして（デフォルト全子タイル存在）状態が正しそう
 			});
 		});
 	};
